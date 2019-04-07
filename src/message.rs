@@ -1,55 +1,40 @@
 use failure::Error;
+use gpgme::{Context, Data, SignMode};
+use serde::{Deserialize, Serialize};
 
-use std::str::FromStr;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Message {
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+/// A type for differentiating between
+pub enum MessageKind {
     /// "Please pin this for me"
     Pin(String),
     /// "I have pinned this"
     Confirm(String),
 }
 
-impl FromStr for Message {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Message, Self::Err> {
-        let mut cmd_iter = s.splitn(2, ' ');
-
-        let cmd = match cmd_iter.next() {
-            Some(c) => c,
-            None => bail!("Could not extract command name"),
-        };
-        let args = match cmd_iter.next() {
-            Some(a) => a,
-            None => bail!("Could not extract command arguments"),
-        };
-
-        match (cmd, args) {
-            ("pin", arg) => Ok(Message::Pin(arg.to_owned())),
-            ("confirm", arg) => Ok(Message::Confirm(arg.to_owned())),
-            (other_cmd, other_args) => Err(format_err!(
-                "Could not understand command {:?} with args {:?}",
-                other_cmd,
-                other_args
-            )),
-        }
-    }
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+/// The full message type
+pub struct Message {
+    /// What the message says
+    pub kind: MessageKind,
+    /// An ASCII-armored detached signature
+    signature: String,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl Message {
+    pub fn from_kind(kind: MessageKind, ctx: &mut Context) -> Result<Self, Error> {
+        ctx.set_armor(true);
+        let encoded_kind = serde_json::to_string(&kind)?;
+        info!("Encoded kind:\n{}", encoded_kind);
 
-    #[test]
-    fn pinreqmsg_from_str_test() {
-        assert_eq!(
-            "pin something".parse::<Message>().unwrap(),
-            Message::Pin("something".to_owned())
-        );
+        let mut signature: Vec<u8> = Vec::new();
 
-        assert_eq!(
-            "confirm something".parse::<Message>().unwrap(),
-            Message::Confirm("something".to_owned())
-        );
+        let kind_data = Data::from_buffer(&encoded_kind)?;
+
+        ctx.sign(SignMode::Detached, kind_data, &mut signature)?;
+
+        Ok(Self {
+            kind,
+            signature: String::from_utf8(signature)?,
+        })
     }
 }
