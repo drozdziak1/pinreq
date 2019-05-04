@@ -1,13 +1,15 @@
 #[macro_use]
 extern crate log;
-
 #[macro_use]
 extern crate failure;
+#[macro_use]
+extern crate serde_derive;
 
 mod message;
 
 use base58::ToBase58;
 use clap::{App, Arg, SubCommand};
+use failure::Error;
 use futures::{
     future::{self, Future},
     stream::Stream,
@@ -17,13 +19,13 @@ use ipfs_api::IpfsClient;
 use log::LevelFilter;
 use tokio::runtime::current_thread;
 
-use std::{env, io::Cursor, process};
+use std::{env, process};
 
-use crate::message::Message;
+use crate::message::{Message, MessageKind};
 
 const DEFAULT_PINREQ_PUBSUB_TOPIC: &'static str = "pinreq";
 
-pub fn main() {
+pub fn main() -> Result<(), Error> {
     // Set logging up
     match env::var("RUST_LOG") {
         Ok(_value) => env_logger::init(),
@@ -95,8 +97,8 @@ pub fn main() {
             debug!("Peer list: {:#?}", peers);
             info!("Requesting a pin for {} ({} peers)", ipfs_hash, peers.len());
 
-            let buffer = format!("pin {}", ipfs_hash);
-
+            let buffer =
+                serde_json::to_string(&Message::from_kind(MessageKind::Pin(ipfs_hash.to_owned()), &mut ctx)?)?;
             let buffer_data = Data::from_buffer(&buffer).unwrap();
 
             let mut signed_data: Vec<u8> = Vec::new();
@@ -149,14 +151,7 @@ pub fn main() {
 
                     match ctx.verify_opaque(&mut data_raw, &mut decrypted_raw) {
                         Ok(_res) => {
-                            let decrypted = match String::from_utf8(decrypted_raw) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    error!("Could not stringify signed data: {}", e.to_string());
-                                    return future::ok(());
-                                }
-                            };
-                            let msg: Message = match decrypted.parse() {
+                            let msg: Message = match serde_json::from_slice(&decrypted_raw) {
                                 Ok(m) => m,
                                 Err(e) => {
                                     error!("Could not parse decrypted content: {}", e.to_string());
@@ -164,8 +159,8 @@ pub fn main() {
                                 }
                             };
                             debug!("Successfully decrypted message: {:?}", msg);
-                            match msg {
-                                Message::Pin(address) => {
+                            match msg.kind {
+                                MessageKind::Pin(address) => {
                                     info!("Pinning address {}", address);
                                     let req = ipfs.pin_add(&address, true).then(|result| {
                                         match result {
@@ -181,7 +176,7 @@ pub fn main() {
 
                                     tokio::spawn(req);
                                 }
-                                Message::Confirm(address) => {
+                                MessageKind::Confirm(address) => {
                                     debug!("Ignoring confirmation for {}", address)
                                 }
                             }
@@ -199,4 +194,5 @@ pub fn main() {
         }
         _ => error!("Unknown command"),
     }
+    Ok(())
 }
