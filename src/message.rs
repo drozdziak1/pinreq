@@ -1,6 +1,6 @@
 use failure::Error;
 use gpgme::{Context, Data, SignMode};
-use serde::{Deserialize, Serialize};
+
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 /// A type for differentiating between

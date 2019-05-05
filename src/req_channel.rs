@@ -1,5 +1,5 @@
 use failure::Error;
-use futures::stream::Stream;
+
 
 use crate::message::Message;
 

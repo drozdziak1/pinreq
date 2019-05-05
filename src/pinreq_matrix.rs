@@ -14,7 +14,7 @@ mod req_channel;
 use failure::Error;
 use gpgme::{Context, Protocol};
 use log::LevelFilter;
-use tokio::runtime::current_thread;
+
 
 use std::{
     env,

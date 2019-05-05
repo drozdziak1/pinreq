@@ -1,7 +1,7 @@
 use failure::Error;
 use futures::{
     future::{self, Future},
-    stream::{self, Stream},
+    stream::{Stream},
 };
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
 use hyper_tls::HttpsConnector;
