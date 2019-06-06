@@ -7,21 +7,22 @@ extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 
-mod matrix_channel;
+mod matrix;
 mod message;
 mod req_channel;
 
 use failure::Error;
+use futures::Stream;
 use gpgme::{Context, Protocol};
 use log::LevelFilter;
-
+use tokio::runtime::current_thread;
 
 use std::{
     env,
     io::{self, Write},
 };
 
-use matrix_channel::MatrixChannel;
+use matrix::MatrixChannel;
 use message::{Message, MessageKind};
 use req_channel::ReqChannel;
 
@@ -57,6 +58,13 @@ pub fn main() -> Result<(), Error> {
     info!("msg: {:#?}", msg);
 
     channel.send_msg(&msg)?;
+
+    let fut = channel.listen()?.for_each(|msg| {
+        println!("Got message: {:?}", msg);
+        Ok(())
+    });
+
+    current_thread::block_on_all(fut)?;
 
     Ok(())
 }

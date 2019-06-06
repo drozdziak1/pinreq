@@ -4,18 +4,10 @@ version = "0.1.0"
 authors = ["Stan Drozd <drozdziak1@gmail.com>"]
 edition = "2018"
 
-[[bin]]
-name = "pinreq-pubsub"
-path = "src/pinreq_pubsub.rs"
-
-[[bin]]
-name = "pinreq-matrix"
-path = "src/pinreq_matrix.rs"
-
 [dependencies]
 base58 = "0.1"
 base64 = "0.10"
-clap = "2.32"
+clap = "2.33"
 env_logger = "0.6"
 failure = "0.1"
 futures = "0.1"

@@ -1,26 +1,16 @@
 use failure::Error;
 use futures::{
     future::{self, Future},
-    stream::{Stream},
+    stream::{self, Stream},
 };
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde_json::Value;
 use tokio::runtime::current_thread;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::{message::Message, req_channel::ReqChannel};
-
-#[derive(Debug, Fail)]
-pub enum MatrixChannelError {
-    #[fail(display = "You need an active auth token to use a Matrix channel")]
-    NotAuthenticated,
-    #[fail(display = "Matrix' response could not be parsed: {}", _0)]
-    ResponseNotUnderstood(String),
-    #[fail(display = "Room {} is not joined", _0)]
-    RoomNotJoined(String),
-}
+use crate::{message::Message, req_channel::ReqChannel, matrix::{MatrixError, MatrixStream}};
 
 pub struct MatrixChannel {
     /// A hyper client instance
@@ -119,7 +109,7 @@ impl MatrixChannel {
         if room_is_joined {
             Ok(())
         } else {
-            Err(MatrixChannelError::RoomNotJoined(self.room_id.clone()).into())
+            Err(MatrixError::RoomNotJoined(self.room_id.clone()).into())
         }
     }
 
@@ -127,7 +117,7 @@ impl MatrixChannel {
     pub fn joined_rooms(&self) -> Box<Future<Item = HashSet<String>, Error = Error>> {
         let access_token = match self.access_token.as_ref() {
             Some(t) => t.clone(),
-            None => return Box::new(future::err(MatrixChannelError::NotAuthenticated.into())),
+            None => return Box::new(future::err(MatrixError::NotAuthenticated.into())),
         };
 
         let rooms_uri = match format!(
@@ -160,7 +150,7 @@ impl MatrixChannel {
                         let rooms = parsed
                             .get("joined_rooms")
                             .ok_or_else(|| {
-                                MatrixChannelError::ResponseNotUnderstood(
+                                MatrixError::ResponseNotUnderstood(
                                     "No joined_rooms in response object".to_owned(),
                                 )
                             })?
@@ -202,7 +192,7 @@ impl MatrixChannel {
                         let id = parsed
                             .get("room_id")
                             .ok_or_else::<Error, _>(|| {
-                                MatrixChannelError::ResponseNotUnderstood(
+                                MatrixError::ResponseNotUnderstood(
                                     "No room_id in response object".to_owned(),
                                 )
                                 .into()
@@ -214,7 +204,7 @@ impl MatrixChannel {
                         Ok(id
                             .as_str()
                             .ok_or_else(|| {
-                                MatrixChannelError::ResponseNotUnderstood(
+                                MatrixError::ResponseNotUnderstood(
                                     "Cannot deserialize room_id as string".to_owned(),
                                 )
                             })?
@@ -225,6 +215,22 @@ impl MatrixChannel {
 
         Box::new(future::ok::<_, Error>(fut).flatten())
     }
+
+
+    pub fn listen(&self) -> Result<MatrixStream, Error> {
+        Ok(MatrixStream {
+            client: self.client.clone(),
+            homeserver: self.homeserver.clone(),
+            room_id: self.room_id.clone(),
+            access_token: self
+                .access_token
+                .as_ref()
+                .ok_or_else(|| MatrixError::NotAuthenticated)?
+                .to_owned(),
+            since: None,
+            messages: Default::default(),
+        })
+    }
 }
 
 impl ReqChannel for MatrixChannel {
@@ -232,7 +238,7 @@ impl ReqChannel for MatrixChannel {
         let access_token = self
             .access_token
             .as_ref()
-            .ok_or_else(|| MatrixChannelError::NotAuthenticated)?
+            .ok_or_else(|| MatrixError::NotAuthenticated)?
             .clone();
 
         let req_body = json!({
@@ -273,29 +279,11 @@ impl ReqChannel for MatrixChannel {
                     "Sent the message successfully, Matrix event ID: {}",
                     event_id
                 );
+
                 Ok(())
             })
         });
 
         current_thread::block_on_all(fut)
     }
-
-/*
- *    fn listen(&self) -> Box<Stream<Item = Message, Error = Error>> {
- *        let filter = json!({
- *            "room": {
- *                "timeline": {
- *                    "types": ["m.room.message"],
- *                    "rooms": self.room_id
- *                }
- *            },
- *            "event_fields": [
- *                "type",
- *                "content"
- *            ]
- *        });
- *
- *        Box::new(stream::empty())
- *    }
- */
 }
