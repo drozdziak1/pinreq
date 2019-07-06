@@ -11,6 +11,7 @@ mod matrix;
 mod message;
 mod req_channel;
 
+use clap::{App, Arg, ArgMatches, SubCommand};
 use failure::Error;
 use futures::Stream;
 use gpgme::{Context, Protocol};
@@ -36,6 +37,48 @@ pub fn main() -> Result<(), Error> {
             .filter_level(LevelFilter::Info)
             .init(),
     }
+
+    let matches = App::new("pinreq")
+        .version(env!("CARGO_PKG_VERSION"))
+        .author("Stan Drozd <drozdziak1@gmail.com>")
+        .about("The IPFS authenticated pin request system")
+        .arg(
+            Arg::with_name("all")
+                .help("Use all configured rooms")
+                .required(false)
+                .takes_value(false)
+                .short("a")
+                .long("all"),
+        )
+        .arg(
+            Arg::with_name("CHANNEL_ID")
+                .min_values(1)
+                .required_unless("all")
+                .use_delimiter(true),
+        )
+        .arg(
+            Arg::with_name("CONFIG_FILE")
+                .help("Config file to use in this run of pinreq")
+                .default_value("pinreq.toml")
+                .takes_value(true)
+                .short("c")
+                .long("config"),
+        )
+        .subcommand(
+            SubCommand::with_name("request")
+                .about("Send a pin request to configured channels (all by default)")
+                .arg(
+                    Arg::with_name("IPFS_HASH")
+                        .required(true)
+                        .index(0)
+                        .help("The hash to send a pin request for"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("listen")
+                .about("Listen for pin requests and other events on a pinreq channel"),
+        )
+        .get_matches();
 
     print!("Username: ");
     io::stdout().flush()?;
