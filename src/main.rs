@@ -86,7 +86,8 @@ pub fn main() -> Result<(), Error> {
     let stdin = io::stdin();
     stdin.read_line(&mut username)?;
     username = username.trim().to_owned();
-    let mut channel = MatrixChannel::new("matrix.org", DEFAULT_PINREQ_MATRIX_ROOM_ALIAS)?;
+    let mut channel =
+        MatrixChannel::new("default", "matrix.org", DEFAULT_PINREQ_MATRIX_ROOM_ALIAS)?;
 
     channel.log_in(&username, rpassword::prompt_password_stderr("Password: ")?)?;
 

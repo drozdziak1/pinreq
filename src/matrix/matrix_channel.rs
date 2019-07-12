@@ -10,18 +10,24 @@ use tokio::runtime::current_thread;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::{message::Message, req_channel::ReqChannel, matrix::{MatrixError, MatrixStream}};
+use crate::{
+    matrix::{MatrixError, MatrixStream},
+    message::Message,
+    req_channel::ReqChannel,
+};
 
 pub struct MatrixChannel {
     /// A hyper client instance
     pub client: Client<HttpsConnector<HttpConnector>>,
+    /// Human-readable name of this Matrix channel
+    pub name: String,
     pub homeserver: String,
     pub room_id: String,
     pub access_token: Option<String>,
 }
 
 impl MatrixChannel {
-    pub fn new(homeserver: &str, room_alias: &str) -> Result<Self, Error> {
+    pub fn new(name: &str, homeserver: &str, room_alias: &str) -> Result<Self, Error> {
         let homeserver = homeserver.to_owned();
 
         let https = HttpsConnector::new(4)?;
@@ -31,6 +37,7 @@ impl MatrixChannel {
 
         let mut new_self = Self {
             client,
+            name: name.to_owned(),
             homeserver,
             room_id: "".to_owned(),
             access_token: None,
@@ -215,7 +222,6 @@ impl MatrixChannel {
 
         Box::new(future::ok::<_, Error>(fut).flatten())
     }
-
 
     pub fn listen(&self) -> Result<MatrixStream, Error> {
         Ok(MatrixStream {
