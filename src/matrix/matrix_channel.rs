@@ -23,7 +23,7 @@ pub struct MatrixChannel {
     pub settings: MatrixChannelSettings,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MatrixChannelSettings {
     /// Human-readable name of this Matrix channel
     pub name: String,

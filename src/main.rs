@@ -7,6 +7,7 @@ extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 
+mod config;
 mod matrix;
 mod message;
 mod req_channel;
@@ -25,6 +26,7 @@ use std::{
     io::{self, Write},
 };
 
+use config::Config;
 use matrix::MatrixChannel;
 use message::{Message, MessageKind};
 use req_channel::ReqChannel;
@@ -82,16 +84,24 @@ pub fn main() -> Result<(), Error> {
         )
         .get_matches();
 
-    print!("Username: ");
-    io::stdout().flush()?;
-    let mut username = String::new();
-    let stdin = io::stdin();
-    stdin.read_line(&mut username)?;
-    username = username.trim().to_owned();
-    let mut channel =
-        MatrixChannel::new("default", "matrix.org", DEFAULT_PINREQ_MATRIX_ROOM_ALIAS)?;
+    let cfg = Config::from_file(matches.value_of("CONFIG_FILE").unwrap())?;
 
-    channel.log_in(&username, rpassword::prompt_password_stderr("Password: ")?)?;
+    debug!("Config: {:#?}", cfg);
+
+    let channel = MatrixChannel::from_settings(cfg.matrix[0].clone())?;
+
+    /*
+     *    print!("Username: ");
+     *    io::stdout().flush()?;
+     *    let mut username = String::new();
+     *    let stdin = io::stdin();
+     *    stdin.read_line(&mut username)?;
+     *    username = username.trim().to_owned();
+     *    let mut channel =
+     *        MatrixChannel::new("default", "matrix.org", DEFAULT_PINREQ_MATRIX_ROOM_ALIAS)?;
+     *
+     *    channel.log_in(&username, rpassword::prompt_password_stderr("Password: ")?)?;
+     */
 
     info!("Token is {:?}", channel.settings.access_token);
 
