@@ -10,6 +10,7 @@ extern crate serde_derive;
 mod matrix;
 mod message;
 mod req_channel;
+mod utils;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use failure::Error;
@@ -20,6 +21,7 @@ use tokio::runtime::current_thread;
 
 use std::{
     env,
+    fs::File,
     io::{self, Write},
 };
 
@@ -91,7 +93,7 @@ pub fn main() -> Result<(), Error> {
 
     channel.log_in(&username, rpassword::prompt_password_stderr("Password: ")?)?;
 
-    info!("Token is {:?}", channel.access_token);
+    info!("Token is {:?}", channel.settings.access_token);
 
     channel.check_room()?;
 

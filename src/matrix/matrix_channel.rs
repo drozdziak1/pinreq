@@ -14,11 +14,17 @@ use crate::{
     matrix::{MatrixError, MatrixStream},
     message::Message,
     req_channel::ReqChannel,
+    utils::new_https_client,
 };
 
 pub struct MatrixChannel {
     /// A hyper client instance
     pub client: Client<HttpsConnector<HttpConnector>>,
+    pub settings: MatrixChannelSettings,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct MatrixChannelSettings {
     /// Human-readable name of this Matrix channel
     pub name: String,
     pub homeserver: String,
@@ -30,40 +36,47 @@ impl MatrixChannel {
     pub fn new(name: &str, homeserver: &str, room_alias: &str) -> Result<Self, Error> {
         let homeserver = homeserver.to_owned();
 
-        let https = HttpsConnector::new(4)?;
-        let client = Client::builder()
-            .keep_alive(false)
-            .build::<_, hyper::Body>(https);
+        let client = new_https_client()?;
 
         let mut new_self = Self {
             client,
-            name: name.to_owned(),
-            homeserver,
-            room_id: "".to_owned(),
-            access_token: None,
+            settings: MatrixChannelSettings {
+                name: name.to_owned(),
+                homeserver,
+                room_id: "".to_owned(),
+                access_token: None,
+            },
         };
 
         let room_id = current_thread::block_on_all(new_self.alias2id(room_alias))?;
 
-        new_self = Self {
-            room_id,
-            ..new_self
-        };
+        new_self.settings.room_id = room_id;
 
         Ok(new_self)
+    }
+
+    pub fn from_settings(settings: MatrixChannelSettings) -> Result<Self, Error> {
+        Ok(Self {
+            client: new_https_client()?,
+            settings,
+        })
     }
 
     /// Attempts to log onto `self.homeserver`. The `password` requires ownership for extra
     /// confidence that the password is dropped after use. (or cloned intentionally if need be);
     /// fills `self.access_token` on success.
     pub fn log_in(&mut self, username: &str, password: String) -> Result<(), Error> {
-        let uri =
-            match format!("https://{}/_matrix/client/r0/login", self.homeserver).parse::<Uri>() {
-                Ok(u) => u,
-                Err(e) => {
-                    bail!("Could not parse server URI: {:?}", e);
-                }
-            };
+        let uri = match format!(
+            "https://{}/_matrix/client/r0/login",
+            self.settings.homeserver
+        )
+        .parse::<Uri>()
+        {
+            Ok(u) => u,
+            Err(e) => {
+                bail!("Could not parse server URI: {:?}", e);
+            }
+        };
 
         let req_body = json!({
             "type": "m.login.password",
@@ -97,39 +110,39 @@ impl MatrixChannel {
             })
         });
 
-        self.access_token = Some(current_thread::block_on_all(fut)?);
+        self.settings.access_token = Some(current_thread::block_on_all(fut)?);
 
         Ok(())
     }
 
     /// Verify that a given Matrix room is available
     pub fn check_room(&self) -> Result<(), Error> {
-        let id = self.room_id.clone();
+        let id = self.settings.room_id.clone();
         let fut = self
             .joined_rooms()
             .and_then(|rooms| Ok(rooms.contains(&id)));
 
         let room_is_joined = current_thread::block_on_all(fut)?;
 
-        debug!("{} joined: {}", self.room_id, room_is_joined);
+        debug!("{} joined: {}", self.settings.room_id, room_is_joined);
 
         if room_is_joined {
             Ok(())
         } else {
-            Err(MatrixError::RoomNotJoined(self.room_id.clone()).into())
+            Err(MatrixError::RoomNotJoined(self.settings.room_id.clone()).into())
         }
     }
 
     /// List all joined rooms.
     pub fn joined_rooms(&self) -> Box<Future<Item = HashSet<String>, Error = Error>> {
-        let access_token = match self.access_token.as_ref() {
+        let access_token = match self.settings.access_token.as_ref() {
             Some(t) => t.clone(),
             None => return Box::new(future::err(MatrixError::NotAuthenticated.into())),
         };
 
         let rooms_uri = match format!(
             "https://{}/_matrix/client/r0/joined_rooms?access_token={}",
-            self.homeserver, access_token
+            self.settings.homeserver, access_token
         )
         .parse::<Uri>()
         {
@@ -175,7 +188,7 @@ impl MatrixChannel {
     fn alias2id(&self, room_alias: &str) -> Box<Future<Item = String, Error = Error>> {
         let alias2id_uri = match format!(
             "https://{}/_matrix/client/r0/directory/room/{}",
-            self.homeserver, room_alias
+            self.settings.homeserver, room_alias
         )
         .parse::<Uri>()
         {
@@ -226,9 +239,10 @@ impl MatrixChannel {
     pub fn listen(&self) -> Result<MatrixStream, Error> {
         Ok(MatrixStream {
             client: self.client.clone(),
-            homeserver: self.homeserver.clone(),
-            room_id: self.room_id.clone(),
+            homeserver: self.settings.homeserver.clone(),
+            room_id: self.settings.room_id.clone(),
             access_token: self
+                .settings
                 .access_token
                 .as_ref()
                 .ok_or_else(|| MatrixError::NotAuthenticated)?
@@ -242,6 +256,7 @@ impl MatrixChannel {
 impl ReqChannel for MatrixChannel {
     fn send_msg(&self, msg: &Message) -> Result<(), Error> {
         let access_token = self
+            .settings
             .access_token
             .as_ref()
             .ok_or_else(|| MatrixError::NotAuthenticated)?
@@ -257,7 +272,7 @@ impl ReqChannel for MatrixChannel {
 
         let uri = format!(
             "https://{}/_matrix/client/r0/rooms/{}/send/m.room.message?access_token={}",
-            self.homeserver, self.room_id, access_token
+            self.settings.homeserver, self.settings.room_id, access_token
         )
         .parse::<Uri>()
         .map_err(|e| format_err!("Could not parse URI: {:?}", e))?;
