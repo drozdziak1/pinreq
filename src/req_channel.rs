@@ -10,3 +10,9 @@ pub trait ReqChannel {
     ///// Receive a stream of parsed pinreq messages for processing
     //fn listen(&self) -> Box<Stream<Item = Message, Error = Error>>;
 }
+
+/// A trait for settings -> channel conversion
+pub trait ChannelSettings {
+    /// Turn a freshly loaded config into a full-blown channel
+    fn to_channel(&self) -> Result<Box<ReqChannel>, Error>;
+}

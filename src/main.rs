@@ -13,7 +13,7 @@ mod message;
 mod req_channel;
 mod utils;
 
-use clap::{App, Arg, ArgMatches, SubCommand};
+use clap::{App, Arg, ArgMatches, SubCommand, Values};
 use failure::Error;
 use futures::Stream;
 use gpgme::{Context, Protocol};
@@ -29,7 +29,7 @@ use std::{
 use config::Config;
 use matrix::MatrixChannel;
 use message::{Message, MessageKind};
-use req_channel::ReqChannel;
+use req_channel::{ChannelSettings, ReqChannel};
 
 static DEFAULT_PINREQ_MATRIX_ROOM_ALIAS: &'static str = "%23ipfs-pinreq:matrix.org";
 
@@ -55,7 +55,8 @@ pub fn main() -> Result<(), Error> {
                 .long("all"),
         )
         .arg(
-            Arg::with_name("CHANNEL_ID")
+            Arg::with_name("CHANNEL_IDS")
+                .help("A comma-separated list of unique channel IDs")
                 .min_values(1)
                 .required_unless("all")
                 .use_delimiter(true),
@@ -74,7 +75,7 @@ pub fn main() -> Result<(), Error> {
                 .arg(
                     Arg::with_name("IPFS_HASH")
                         .required(true)
-                        .index(0)
+                        .index(1)
                         .help("The hash to send a pin request for"),
                 ),
         )
@@ -84,11 +85,25 @@ pub fn main() -> Result<(), Error> {
         )
         .get_matches();
 
-    let cfg = Config::from_file(matches.value_of("CONFIG_FILE").unwrap())?;
+    let cfg = Config::from_file(
+        matches
+            .value_of("CONFIG_FILE")
+            .ok_or(format_err!("INTERNAL: Expected CONFIG_FILE to be Some()"))?,
+    )?;
+
+    let requested_channels = matches.values_of("CHANNEL_IDS");
 
     debug!("Config: {:#?}", cfg);
 
-    let channel = MatrixChannel::from_settings(cfg.matrix[0].clone())?;
+    match matches.subcommand() {
+        ("listen", Some(matches)) => {
+            handle_listen(matches, cfg, requested_channels)?;
+        }
+        ("request", Some(matches)) => {
+            handle_request(matches, cfg, requested_channels)?;
+        }
+        _other => unreachable!(),
+    }
 
     /*
      *    print!("Username: ");
@@ -102,25 +117,67 @@ pub fn main() -> Result<(), Error> {
      *
      *    channel.log_in(&username, rpassword::prompt_password_stderr("Password: ")?)?;
      */
+    /*    // The ReqChannel type doesn't have listen() yet
+     *    let fut = channel.listen()?.for_each(|msg| {
+     *        println!("Got message: {:?}", msg);
+     *        Ok(())
+     *    });
+     *
+     *    current_thread::block_on_all(fut)?;
+     */
 
-    info!("Token is {:?}", channel.settings.access_token);
+    Ok(())
+}
 
-    channel.check_room()?;
+fn handle_listen(
+    matches: &ArgMatches,
+    cfg: Config,
+    requested_channels: Option<Values>,
+) -> Result<(), Error> {
+    Ok(())
+}
 
-    let mut ctx = Context::from_protocol(Protocol::OpenPgp)?;
+fn handle_request(
+    matches: &ArgMatches,
+    cfg: Config,
+    requested_channels: Option<Values>,
+) -> Result<(), Error> {
+    let cfg_map = cfg.to_map()?;
 
-    let msg = Message::from_kind(MessageKind::Pin("/ipfs/QmHenlo".to_owned()), &mut ctx)?;
+    let ipfs_hash = matches
+        .value_of("IPFS_HASH")
+        .ok_or(format_err!("INTERNAL: expected IPFS_HASH to be specified"))?;
 
-    info!("msg: {:#?}", msg);
+    info!("Pinning {}", ipfs_hash);
 
-    channel.send_msg(&msg)?;
+    // We assume that when requested_channels is None -a/--all was specified
+    let channel_names: Vec<_> = if let Some(chans) = requested_channels {
+        // Check if all channels exist beforehand
+        chans
+            .map(|c| {
+                if cfg_map.contains_key(c) {
+                    Ok(c)
+                } else {
+                    Err(format_err!("Channel {} not found", c))
+                }
+            })
+            .collect::<Result<Vec<_>, Error>>()?
+    } else {
+        cfg_map.keys().map(|s| s.as_str()).collect()
+    };
 
-    let fut = channel.listen()?.for_each(|msg| {
-        println!("Got message: {:?}", msg);
-        Ok(())
-    });
+    for ch_name in channel_names {
+        let channel = cfg_map
+            .get(ch_name)
+            .ok_or(format_err!("INTERNAL:Channel {} not found", ch_name))?
+            .to_channel()?;
 
-    current_thread::block_on_all(fut)?;
+        let mut ctx = Context::from_protocol(Protocol::OpenPgp)?;
+        let msg = Message::from_kind(MessageKind::Pin(ipfs_hash.to_owned()), &mut ctx)?;
 
+        info!("msg: {:#?}", msg);
+
+        channel.as_ref().send_msg(&msg)?;
+    }
     Ok(())
 }

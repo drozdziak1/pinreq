@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::{
     matrix::{MatrixError, MatrixStream},
     message::Message,
-    req_channel::ReqChannel,
+    req_channel::{ChannelSettings, ReqChannel},
     utils::new_https_client,
 };
 
@@ -53,13 +53,6 @@ impl MatrixChannel {
         new_self.settings.room_id = room_id;
 
         Ok(new_self)
-    }
-
-    pub fn from_settings(settings: MatrixChannelSettings) -> Result<Self, Error> {
-        Ok(Self {
-            client: new_https_client()?,
-            settings,
-        })
     }
 
     /// Attempts to log onto `self.homeserver`. The `password` requires ownership for extra
@@ -255,6 +248,8 @@ impl MatrixChannel {
 
 impl ReqChannel for MatrixChannel {
     fn send_msg(&self, msg: &Message) -> Result<(), Error> {
+        self.check_room()?;
+
         let access_token = self
             .settings
             .access_token
@@ -306,5 +301,14 @@ impl ReqChannel for MatrixChannel {
         });
 
         current_thread::block_on_all(fut)
+    }
+}
+
+impl ChannelSettings for MatrixChannelSettings {
+    fn to_channel(&self) -> Result<Box<ReqChannel>, Error> {
+        Ok(Box::new(MatrixChannel {
+            client: new_https_client()?,
+            settings: self.clone(),
+        }))
     }
 }
