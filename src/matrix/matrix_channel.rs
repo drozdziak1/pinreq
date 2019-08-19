@@ -241,7 +241,7 @@ impl MatrixChannel {
                 .ok_or_else(|| MatrixError::NotAuthenticated)?
                 .to_owned(),
             since: None,
-            messages: Default::default(),
+            fut: None,
         })
     }
 }

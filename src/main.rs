@@ -21,6 +21,7 @@ use log::LevelFilter;
 use tokio::runtime::current_thread;
 
 use std::{
+    collections::HashMap,
     env,
     fs::File,
     io::{self, Write},
@@ -95,12 +96,30 @@ pub fn main() -> Result<(), Error> {
 
     debug!("Config: {:#?}", cfg);
 
+    let cfg_map = cfg.to_map()?;
+
+    // We assume that when requested_channels is None -a/--all was specified
+    let channel_names: Vec<_> = if let Some(chans) = requested_channels {
+        // Check if all channels exist beforehand
+        chans
+            .map(|c| {
+                if cfg_map.contains_key(c) {
+                    Ok(c)
+                } else {
+                    Err(format_err!("Channel {} not found", c))
+                }
+            })
+            .collect::<Result<Vec<_>, Error>>()?
+    } else {
+        cfg_map.keys().map(|s| s.as_str()).collect()
+    };
+
     match matches.subcommand() {
         ("listen", Some(matches)) => {
-            handle_listen(matches, cfg, requested_channels)?;
+            handle_listen(matches, &cfg_map, channel_names.as_slice())?;
         }
         ("request", Some(matches)) => {
-            handle_request(matches, cfg, requested_channels)?;
+            handle_request(matches, &cfg_map, channel_names.as_slice())?;
         }
         _other => unreachable!(),
     }
@@ -131,45 +150,30 @@ pub fn main() -> Result<(), Error> {
 
 fn handle_listen(
     matches: &ArgMatches,
-    cfg: Config,
-    requested_channels: Option<Values>,
+    cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
+    channels: &[&str],
 ) -> Result<(), Error> {
+
+    info!("Listening on channels: {:?}", channels);
+
     Ok(())
 }
 
 fn handle_request(
     matches: &ArgMatches,
-    cfg: Config,
-    requested_channels: Option<Values>,
+    cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
+    channels: &[&str],
 ) -> Result<(), Error> {
-    let cfg_map = cfg.to_map()?;
-
     let ipfs_hash = matches
         .value_of("IPFS_HASH")
         .ok_or(format_err!("INTERNAL: expected IPFS_HASH to be specified"))?;
 
     info!("Pinning {}", ipfs_hash);
 
-    // We assume that when requested_channels is None -a/--all was specified
-    let channel_names: Vec<_> = if let Some(chans) = requested_channels {
-        // Check if all channels exist beforehand
-        chans
-            .map(|c| {
-                if cfg_map.contains_key(c) {
-                    Ok(c)
-                } else {
-                    Err(format_err!("Channel {} not found", c))
-                }
-            })
-            .collect::<Result<Vec<_>, Error>>()?
-    } else {
-        cfg_map.keys().map(|s| s.as_str()).collect()
-    };
-
-    for ch_name in channel_names {
+    for ch_name in channels {
         let channel = cfg_map
-            .get(ch_name)
-            .ok_or(format_err!("INTERNAL:Channel {} not found", ch_name))?
+            .get(ch_name.to_owned())
+            .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
             .to_channel()?;
 
         let mut ctx = Context::from_protocol(Protocol::OpenPgp)?;
