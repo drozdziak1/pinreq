@@ -17,7 +17,7 @@ pub struct Message {
     /// What the message says
     pub kind: MessageKind,
     /// An ASCII-armored detached signature
-    signature: String,
+    pub signature: String,
 }
 
 impl Message {

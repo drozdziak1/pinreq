@@ -8,7 +8,10 @@ use hyper_tls::HttpsConnector;
 use serde_json::Value;
 use tokio::runtime::current_thread;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     matrix::{MatrixError, MatrixStream},
@@ -30,6 +33,8 @@ pub struct MatrixChannelSettings {
     pub homeserver: String,
     pub room_id: String,
     pub access_token: Option<String>,
+    /// A timestamp of last sync
+    pub last_sync: Option<String>,
 }
 
 impl MatrixChannel {
@@ -45,6 +50,7 @@ impl MatrixChannel {
                 homeserver,
                 room_id: "".to_owned(),
                 access_token: None,
+                last_sync: None,
             },
         };
 
@@ -228,22 +234,6 @@ impl MatrixChannel {
 
         Box::new(future::ok::<_, Error>(fut).flatten())
     }
-
-    pub fn listen(&self) -> Result<MatrixStream, Error> {
-        Ok(MatrixStream {
-            client: self.client.clone(),
-            homeserver: self.settings.homeserver.clone(),
-            room_id: self.settings.room_id.clone(),
-            access_token: self
-                .settings
-                .access_token
-                .as_ref()
-                .ok_or_else(|| MatrixError::NotAuthenticated)?
-                .to_owned(),
-            since: None,
-            fut: None,
-        })
-    }
 }
 
 impl ReqChannel for MatrixChannel {
@@ -301,6 +291,22 @@ impl ReqChannel for MatrixChannel {
         });
 
         current_thread::block_on_all(fut)
+    }
+
+    fn listen(&self) -> Result<Box<Stream<Item = Vec<Message>, Error = Error>>, Error> {
+        Ok(Box::new(MatrixStream {
+            client: self.client.clone(),
+            homeserver: self.settings.homeserver.clone(),
+            room_id: self.settings.room_id.clone(),
+            access_token: self
+                .settings
+                .access_token
+                .as_ref()
+                .ok_or_else(|| MatrixError::NotAuthenticated)?
+                .to_owned(),
+            last_sync: Arc::new(Mutex::new(self.settings.last_sync.clone())),
+            fut: None,
+        }))
     }
 }
 

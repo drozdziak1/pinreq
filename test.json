@@ -1,0 +1,12 @@
+{
+        "account_data": { "not_types": "m.*" },
+        "event_fields": ["type", "content"],
+        "presence": { "not_types": "m.*" },
+        "room": {
+                "account_data": { "not_types": ["*"] },
+                "ephemeral": { "not_types": ["*"] },
+                "rooms": ["!yWHkBTRFryvFloLWcI:matrix.org"],
+                "state": { "not_types": ["*"] },
+                "timeline": { "types": ["m.room.message"] }
+        }
+}

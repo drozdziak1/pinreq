@@ -4,6 +4,7 @@ use hyper::{client::HttpConnector, Body, Client, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde_json::Value;
 use tokio::runtime::current_thread;
+use url::Url;
 
 use std::{
     collections::VecDeque,
@@ -19,7 +20,7 @@ pub struct MatrixStream {
     pub room_id: String,
     pub access_token: String,
     /// When to continue syncing from, None means first sync
-    pub since: Option<String>,
+    pub last_sync: Arc<Mutex<Option<String>>>,
     /// Current request future
     pub fut: Option<Box<Future<Item = Option<Vec<Message>>, Error = Error>>>,
 }
@@ -30,21 +31,31 @@ impl Stream for MatrixStream {
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         // Check if there's a request future already in progress
         if let Some(fut) = self.fut.as_mut() {
-            return fut.poll();
+            let poll_res = fut.poll();
+
+            if let Ok(Async::Ready(_)) = poll_res.as_ref() {
+                self.fut = None;
+            }
+
+            return poll_res;
         }
 
         let filter = json!({
             "room": {
-                "account_data": {
-                    "not_types": ["*"]
-                },
-                "ephemeral": {
-                    "not_types": ["*"]
-                },
+                /*
+                 *"account_data": {
+                 *    "not_types": ["*"]
+                 *},
+                 *"ephemeral": {
+                 *    "not_types": ["*"]
+                 *},
+                 */
                 "rooms": [self.room_id],
-                "state": {
-                    "not_types": ["*"]
-                },
+                /*
+                 *"state": {
+                 *    "not_types": ["*"]
+                 *},
+                 */
                 "timeline": {
                     "types": ["m.room.message"]
                 },
@@ -53,40 +64,48 @@ impl Stream for MatrixStream {
                 "type",
                 "content"
             ],
-            "presence": {
-                "not_types": "m.*"
-            },
-            "account_data": {
-                "not_types": "m.*"
-            },
         });
 
         debug!("Listening with filter: {:#?}", filter);
 
         let serialized = serde_json::to_string(&filter)?;
-        trace!("Serialized filter: {:?}", serialized);
+        debug!("Serialized filter: {:?}", serialized);
 
-        let req_body = json!({
-            "filter": serialized,
-        })
-        .to_string();
+        let sync_opt = self
+            .last_sync
+            .lock()
+            .map_err(|_| format_err!("Could not lock last_sync"))?
+            .clone();
+        debug!("Requesting batch {:?}", sync_opt);
 
-        let uri = format!(
-            "https://{}/_matrix/client/r0/sync?access_token={}",
-            self.homeserver, self.access_token
-        )
-        .parse::<Uri>()
-        .map_err(|e| format_err!("Could not parse URI: {:?}", e))?;
+        let mut url = Url::parse_with_params(
+            format!("https://{}/_matrix/client/r0/sync", self.homeserver).as_str(),
+            &[
+            ("access_token", self.access_token.as_str()),
+            ("filter", serialized.as_str()),
+            ("full_state", "false"),
+            ],
+            )?;
+        if let Some(since) = sync_opt {
+            url.query_pairs_mut().append_pair("since", &since);
+        }
 
-        debug!("Hitting URI {}", uri);
+        debug!("Hitting URI {}", url.as_str());
+
+        let uri = url
+            .as_str()
+            .parse::<Uri>()
+            .map_err(|e| format_err!("Could not parse URI: {:?}", e))?;
 
         let req = Request::builder()
             .method("GET")
             .header("Contnent-Type", "application/json")
             .uri(uri.clone())
-            .body(Body::from(req_body))?;
+            .body(Body::empty())?;
 
         let room_id = self.room_id.clone();
+
+        let mut last_sync = self.last_sync.clone();
 
         let fut = self
             .client
@@ -100,19 +119,24 @@ impl Stream for MatrixStream {
                     .and_then(move |chunks| {
                         trace!("Got chunks: {:?}", chunks);
                         let parsed: Value = serde_json::from_slice(&*chunks)?;
-                        debug!("Parsed: {:?}", parsed);
+                        trace!("Parsed: {:?}", parsed);
                         if let Some(obj) = parsed.as_object() {
                             let keys: Vec<_> = obj.keys().collect();
 
                             debug!("{} response keys: {:?}", keys.len(), keys);
                         }
 
-                        let rooms = parsed
-                            .get("rooms")
-                            .ok_or(format_err!("Could not find key `rooms` in response object"))?;
-                        let join = rooms.get("join").ok_or(format_err!(
-                            "Could not find key `join` in response object `rooms`"
-                        ))?;
+                        let rooms = if let Some(rooms) = parsed.get("rooms") {
+                            rooms
+                        } else {
+                            return Ok(Some(Vec::new()));
+                        };
+
+                        let join = if let Some(join) = rooms.get("join") {
+                            join
+                        } else {
+                            return Ok(Some(Vec::new()));
+                        };
 
                         if let Some(obj) = join.as_object() {
                             let keys: Vec<_> = obj.keys().collect();
@@ -120,10 +144,11 @@ impl Stream for MatrixStream {
                             debug!("{} rooms keys: {:?}", keys.len(), keys);
                         }
 
-                        let join_room_id = join.get(&room_id).ok_or(format_err!(
-                            "{}: Could not find the room's entry in response object",
-                            room_id
-                        ))?;
+                        let join_room_id = if let Some(join_room_id) = join.get(&room_id) {
+                            join_room_id
+                        } else {
+                            return Ok(Some(Vec::new()));
+                        };
 
                         if let Some(obj) = join_room_id.as_object() {
                             let keys: Vec<_> = obj.keys().collect();
@@ -174,12 +199,25 @@ impl Stream for MatrixStream {
                                     other => bail!("Got unknown message type {}", other),
                                 };
 
-                                info!("Parsed event: {:#?}", msg);
+                                debug!("Parsed event: {:#?}", msg);
 
                                 Ok(msg)
                             })
-                            .collect::<Result<Vec<Message>, Error>>()?;
+                        .collect::<Result<Vec<Message>, Error>>()?;
 
+                        let next_batch = parsed
+                            .get("next_batch")
+                            .ok_or(format_err!("Could not reach `next-batch`"))?
+                            .as_str()
+                            .ok_or(format_err!("Could not view next_batch as string"))?;
+
+                        trace!("Next batch: {}", next_batch);
+
+                        let mut last_sync_lock = last_sync
+                            .lock()
+                            .map_err(|_| format_err!("Could not lock last_sync"))?;
+
+                        *last_sync_lock = Some(next_batch.to_owned());
                         Ok(Some(msgs))
                     })
             });
