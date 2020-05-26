@@ -15,10 +15,9 @@ mod utils;
 
 use clap::{App, Arg, ArgMatches, SubCommand, Values};
 use failure::Error;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use gpgme::{Context, Protocol};
 use log::LevelFilter;
-use tokio::runtime::current_thread;
 
 use std::{
     collections::HashMap,
@@ -124,27 +123,6 @@ pub fn main() -> Result<(), Error> {
         _other => unreachable!(),
     }
 
-    /*
-     *    print!("Username: ");
-     *    io::stdout().flush()?;
-     *    let mut username = String::new();
-     *    let stdin = io::stdin();
-     *    stdin.read_line(&mut username)?;
-     *    username = username.trim().to_owned();
-     *    let mut channel =
-     *        MatrixChannel::new("default", "matrix.org", DEFAULT_PINREQ_MATRIX_ROOM_ALIAS)?;
-     *
-     *    channel.log_in(&username, rpassword::prompt_password_stderr("Password: ")?)?;
-     */
-    /*    // The ReqChannel type doesn't have listen() yet
-     *    let fut = channel.listen()?.for_each(|msg| {
-     *        println!("Got message: {:?}", msg);
-     *        Ok(())
-     *    });
-     *
-     *    current_thread::block_on_all(fut)?;
-     */
-
     Ok(())
 }
 
@@ -153,49 +131,7 @@ fn handle_listen(
     cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
     channels: &[&str],
 ) -> Result<(), Error> {
-    info!("Listening on channels: {:?}", channels);
-
-    let ch_name = channels[0];
-
-    let channel = cfg_map
-        .get(ch_name)
-        .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
-        .to_channel()?;
-
-    /// Process the parsed messages
-    let fut = channel.as_ref().listen()?.for_each(|msgs| {
-        let mut ctx = Context::from_protocol(Protocol::OpenPgp)?;
-
-        if msgs.len() == 0 {
-            debug!("No messages on this run");
-            return Ok(());
-        }
-
-        for msg in msgs {
-            // Verify the signature
-            let verif_res =
-                ctx.verify_detached(msg.signature.as_bytes(), serde_json::to_vec(&msg.kind)?)?;
-
-            for sig in verif_res.signatures() {
-                match sig.status() {
-                    Ok(_) => debug!("Message signature OK"),
-                    Err(e) => {
-                        warn!("Message signature invalid: {}", e.to_string());
-                        continue;
-                    }
-                }
-
-                // TODO: Check for presence of required fingerprints
-            }
-
-            // TODO: Parse and pin the requested hash
-        }
-        Ok(())
-    });
-
-    current_thread::block_on_all(fut)?;
-
-    Ok(())
+    unimplemented!();
 }
 
 fn handle_request(

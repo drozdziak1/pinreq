@@ -8,11 +8,11 @@ pub trait ReqChannel {
     /// Send a pinreq `Message` to this channel
     fn send_msg(&self, msg: &Message) -> Result<(), Error>;
     ///// Receive a stream of parsed pinreq messages for processing
-    fn listen(&self) -> Result<Box<Stream<Item = Vec<Message>, Error = Error>>, Error>;
+    fn listen(&self) -> Result<Box<dyn Stream<Item = Vec<Message>>>, Error>;
 }
 
 /// A trait for settings -> channel conversion
 pub trait ChannelSettings {
     /// Turn a freshly loaded config into a full-blown channel
-    fn to_channel(&self) -> Result<Box<ReqChannel>, Error>;
+    fn to_channel(&self) -> Result<Box<dyn ReqChannel>, Error>;
 }

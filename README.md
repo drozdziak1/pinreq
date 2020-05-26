@@ -5,6 +5,3 @@ authenticated requests to pin your IPFS content over various protocols.
 ## Supported protocols
 * Matrix
 * IPFS' pubsub
-
-## Planned protocols
-* IRC
