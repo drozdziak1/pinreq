@@ -3,10 +3,14 @@ use futures::{
     future::{self, Future},
     stream::{self, Stream, TryStream},
 };
-use serde_json::Value;
+use hyper::client::{HttpConnector};
+use ruma_client::{Client, Session};
+use ruma_identifiers::RoomAliasId;
+use url::Url;
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    convert::TryFrom,
     sync::{Arc, Mutex},
 };
 
@@ -14,11 +18,10 @@ use crate::{
     matrix::MatrixError,
     message::Message,
     req_channel::{ChannelSettings, ReqChannel},
-    utils::{ ErrBox},
+    utils::ErrBox,
 };
 
 pub struct MatrixChannel {
-    /// A hyper client instance
     pub settings: MatrixChannelSettings,
 }
 
@@ -26,21 +29,26 @@ pub struct MatrixChannel {
 pub struct MatrixChannelSettings {
     /// Human-readable name of this Matrix channel
     pub name: String,
-    pub homeserver: String,
-    pub room_id: String,
-    pub access_token: Option<String>,
-    /// A timestamp of last sync
-    pub last_sync: Option<String>,
+    pub homeserver: Url,
+    pub room_id: RoomAliasId,
+    pub session: Option<Session>,
 }
 
 impl MatrixChannel {
-    pub fn new(name: &str, homeserver: &str, room_alias: &str) -> Result<Self, Error> {
-        unimplemented!();
+    pub fn new(name: &str, homeserver: Url, room_alias: RoomAliasId) -> Result<Self, Error> {
+        Ok(Self {
+            settings: MatrixChannelSettings {
+                name: name.to_owned(),
+                homeserver,
+                room_id: RoomAliasId::try_from(room_alias)?,
+                session: None,
+            },
+        })
     }
 
     /// Attempts to log onto `self.homeserver`. The `password` requires ownership for extra
     /// confidence that the password is dropped after use. (or cloned intentionally if need be);
-    /// fills `self.access_token` on success.
+    /// fills `self.session` on success.
     pub fn log_in(&mut self, username: &str, password: String) -> Result<(), Error> {
         unimplemented!();
     }
