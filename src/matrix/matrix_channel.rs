@@ -3,8 +3,6 @@ use futures::{
     future::{self, Future},
     stream::{self, Stream, TryStream},
 };
-use hyper::{client::HttpConnector, Body, Client, Request, Uri};
-use hyper_tls::HttpsConnector;
 use serde_json::Value;
 
 use std::{
@@ -13,15 +11,14 @@ use std::{
 };
 
 use crate::{
-    matrix::{MatrixError},
+    matrix::MatrixError,
     message::Message,
     req_channel::{ChannelSettings, ReqChannel},
-    utils::{new_https_client, ErrBox},
+    utils::{ ErrBox},
 };
 
 pub struct MatrixChannel {
     /// A hyper client instance
-    pub client: Client<HttpsConnector<HttpConnector>>,
     pub settings: MatrixChannelSettings,
 }
 
@@ -77,7 +74,6 @@ impl ReqChannel for MatrixChannel {
 impl ChannelSettings for MatrixChannelSettings {
     fn to_channel(&self) -> Result<Box<ReqChannel>, Error> {
         Ok(Box::new(MatrixChannel {
-            client: new_https_client()?,
             settings: self.clone(),
         }))
     }

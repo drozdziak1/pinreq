@@ -33,7 +33,8 @@ use req_channel::{ChannelSettings, ReqChannel};
 
 static DEFAULT_PINREQ_MATRIX_ROOM_ALIAS: &'static str = "%23ipfs-pinreq:matrix.org";
 
-pub fn main() -> Result<(), Error> {
+#[tokio::main]
+async fn main() -> Result<(), Error> {
     // Set logging up
     match env::var("RUST_LOG") {
         Ok(_value) => env_logger::init(),
@@ -115,10 +116,10 @@ pub fn main() -> Result<(), Error> {
 
     match matches.subcommand() {
         ("listen", Some(matches)) => {
-            handle_listen(matches, &cfg_map, channel_names.as_slice())?;
+            handle_listen(matches, &cfg_map, channel_names.as_slice()).await?;
         }
         ("request", Some(matches)) => {
-            handle_request(matches, &cfg_map, channel_names.as_slice())?;
+            handle_request(matches, &cfg_map, channel_names.as_slice()).await?;
         }
         _other => unreachable!(),
     }
@@ -126,16 +127,16 @@ pub fn main() -> Result<(), Error> {
     Ok(())
 }
 
-fn handle_listen(
-    matches: &ArgMatches,
+async fn handle_listen(
+    matches: &ArgMatches<'_>,
     cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
     channels: &[&str],
 ) -> Result<(), Error> {
     unimplemented!();
 }
 
-fn handle_request(
-    matches: &ArgMatches,
+async fn handle_request(
+    matches: &ArgMatches<'_>,
     cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
     channels: &[&str],
 ) -> Result<(), Error> {

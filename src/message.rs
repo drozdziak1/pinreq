@@ -1,7 +1,6 @@
 use failure::Error;
 use gpgme::{Context, Data, SignMode};
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 /// A type for differentiating between
 pub enum MessageKind {
