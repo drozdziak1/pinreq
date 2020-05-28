@@ -157,7 +157,7 @@ async fn handle_request(
 
         info!("msg: {:#?}", msg);
 
-        channel.as_ref().send_msg(&msg)?;
+        channel.as_ref().send_msg(&msg).await?;
     }
     Ok(())
 }

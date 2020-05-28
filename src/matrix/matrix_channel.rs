@@ -1,11 +1,20 @@
+use async_trait::async_trait;
 use failure::Error;
 use futures::{
     future::{self, Future},
     stream::{self, Stream, TryStream},
 };
-use hyper::client::{HttpConnector};
-use ruma_client::{Client, Session};
-use ruma_identifiers::RoomAliasId;
+use hyper::client::HttpConnector;
+use ruma_client::{
+    api::r0,
+    events::{
+        room::message::{TextMessageEventContent, MessageEventContent},
+        EventType,
+    },
+    identifiers::{RoomAliasId, RoomId},
+    Client, Session,
+};
+use serde_json::value::to_raw_value as to_raw_json_value;
 use url::Url;
 
 use std::{
@@ -30,7 +39,7 @@ pub struct MatrixChannelSettings {
     /// Human-readable name of this Matrix channel
     pub name: String,
     pub homeserver: Url,
-    pub room_id: RoomAliasId,
+    pub room_alias: RoomAliasId,
     pub session: Option<Session>,
 }
 
@@ -40,17 +49,34 @@ impl MatrixChannel {
             settings: MatrixChannelSettings {
                 name: name.to_owned(),
                 homeserver,
-                room_id: RoomAliasId::try_from(room_alias)?,
+                room_alias: RoomAliasId::try_from(room_alias)?,
                 session: None,
             },
         })
     }
 
     /// Attempts to log onto `self.homeserver`. The `password` requires ownership for extra
-    /// confidence that the password is dropped after use. (or cloned intentionally if need be);
-    /// fills `self.session` on success.
-    pub fn log_in(&mut self, username: &str, password: String) -> Result<(), Error> {
-        unimplemented!();
+    /// confidence that the password is dropped after use. (or cloned intentionally if need be)
+    /// fills `self.session` on success. If `self.session` is `Some` a new session overwrites the
+    /// present one.
+    pub async fn log_in(&mut self, username: &str, password: String) -> Result<(), Error> {
+        let client = Client::https(self.settings.homeserver.clone(), None);
+
+        self.settings.session = Some(
+            client
+                .log_in(username.to_owned(), password, None, None)
+                .await?,
+        );
+        Ok(())
+    }
+
+    pub fn get_session<'a>(&'a self) -> Result<&'a Session, Error> {
+        Ok(self.settings.session.as_ref().ok_or_else(|| {
+            format_err!(
+                "No session established for Matrix channel {}",
+                self.settings.name
+            )
+        })?)
     }
 
     /// Verify that a given Matrix room is available
@@ -64,14 +90,45 @@ impl MatrixChannel {
     }
 
     /// Dereference an alias to a room ID; used by `MatrixChannel::new()`
-    async fn alias2id(&self, room_alias: &str) -> Result<String, Error> {
-        unimplemented!();
+    async fn alias2id(&self, room_alias: RoomAliasId) -> Result<RoomId, Error> {
+        let session = self.get_session()?;
+        let settings = &self.settings;
+
+        let client = Client::https(settings.homeserver.clone(), Some(session.clone()));
+
+        let res = client.request(r0::alias::get_alias::Request {
+            room_alias: room_alias,
+        }).await?;
+
+        Ok(res.room_id)
     }
 }
 
+#[async_trait]
 impl ReqChannel for MatrixChannel {
-    fn send_msg(&self, msg: &Message) -> Result<(), Error> {
-        unimplemented!();
+    async fn send_msg(&self, msg: &Message) -> Result<(), Error> {
+        let session = self.get_session()?;
+        let settings = &self.settings;
+
+        let client = Client::https(settings.homeserver.clone(), Some(session.clone()));
+
+        let room_id = self.alias2id(settings.room_alias.clone()).await?;
+
+        client
+            .request(r0::message::create_message_event::Request {
+                room_id,
+                event_type: EventType::RoomMessage,
+                txn_id: "1".to_owned(),
+                data: to_raw_json_value(&MessageEventContent::Text(TextMessageEventContent {
+                    body: "Hello World".to_owned(),
+                    format: None,
+                    formatted_body: None,
+                    relates_to: None,
+                }))?,
+            })
+            .await?;
+
+        Ok(())
     }
 
     fn listen(&self) -> Result<Box<dyn Stream<Item = Vec<Message>>>, Error> {
