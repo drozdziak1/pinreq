@@ -2,7 +2,7 @@ use failure::Error;
 use gpgme::{Context, Data, SignMode};
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-/// A type for differentiating between
+/// A type for differentiating between message types
 pub enum MessageKind {
     /// "Please pin this for me"
     Pin(String),

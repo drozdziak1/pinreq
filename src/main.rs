@@ -31,7 +31,7 @@ use matrix::MatrixChannel;
 use message::{Message, MessageKind};
 use req_channel::{ChannelSettings, ReqChannel};
 
-static DEFAULT_PINREQ_MATRIX_ROOM_ALIAS: &'static str = "%23ipfs-pinreq:matrix.org";
+static DEFAULT_PINREQ_MATRIX_ROOM_ALIAS: &'static str = "#ipfs-pinreq:matrix.org";
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -155,7 +155,7 @@ async fn handle_request(
         let mut ctx = Context::from_protocol(Protocol::OpenPgp)?;
         let msg = Message::from_kind(MessageKind::Pin(ipfs_hash.to_owned()), &mut ctx)?;
 
-        info!("msg: {:#?}", msg);
+        debug!("[{}] sending msg: {:#?}", ch_name, msg);
 
         channel.as_ref().send_msg(&msg).await?;
     }

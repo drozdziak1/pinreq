@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use failure::Error;
 use futures::{
     future::{self, Future},
@@ -114,19 +115,22 @@ impl ReqChannel for MatrixChannel {
 
         let room_id = self.alias2id(settings.room_alias.clone()).await?;
 
-        client
+        let response = client
             .request(r0::message::create_message_event::Request {
                 room_id,
                 event_type: EventType::RoomMessage,
-                txn_id: "1".to_owned(),
+                // Matrix's measure for request idempotency; must be unique
+                txn_id: format!("{:?}:{}", msg.kind, Utc::now().to_rfc3339()),
                 data: to_raw_json_value(&MessageEventContent::Text(TextMessageEventContent {
-                    body: "Hello World".to_owned(),
+                    body: serde_json::to_string(msg)?,
                     format: None,
                     formatted_body: None,
                     relates_to: None,
                 }))?,
             })
             .await?;
+
+        debug!("Got response: {:?}", response);
 
         Ok(())
     }
