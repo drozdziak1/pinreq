@@ -132,7 +132,20 @@ async fn handle_listen(
     cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
     channels: &[&str],
 ) -> Result<(), Error> {
-    unimplemented!();
+    for ch_name in channels {
+        let mut channel = cfg_map
+            .get(ch_name.to_owned())
+            .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
+            .to_channel()?;
+
+        channel
+            .as_ref()
+            .listen()
+            .await?
+            .collect::<Vec<_>>()
+            .await?;
+    }
+    Ok(())
 }
 
 async fn handle_request(

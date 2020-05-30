@@ -3,13 +3,13 @@ use chrono::{DateTime, Utc};
 use failure::Error;
 use futures::{
     future::{self, Future},
-    stream::{self, Stream, TryStream},
+    stream::{self, Stream, StreamExt, TryStream, TryStreamExt},
 };
 use hyper::client::HttpConnector;
 use ruma_client::{
-    api::r0,
+    api::r0::{self, sync::sync_events::SetPresence},
     events::{
-        room::message::{TextMessageEventContent, MessageEventContent},
+        room::message::{MessageEventContent, TextMessageEventContent},
         EventType,
     },
     identifiers::{RoomAliasId, RoomId},
@@ -80,7 +80,7 @@ impl MatrixChannel {
         })?)
     }
 
-    /// Verify that a given Matrix room is available
+    /// Verify that the configured Matrix room is available
     pub fn check_room(&self) -> Result<(), Error> {
         unimplemented!();
     }
@@ -97,9 +97,9 @@ impl MatrixChannel {
 
         let client = Client::https(settings.homeserver.clone(), Some(session.clone()));
 
-        let res = client.request(r0::alias::get_alias::Request {
-            room_alias: room_alias,
-        }).await?;
+        let res = client
+            .request(r0::alias::get_alias::Request { room_alias })
+            .await?;
 
         Ok(res.room_id)
     }
@@ -135,8 +135,27 @@ impl ReqChannel for MatrixChannel {
         Ok(())
     }
 
-    fn listen(&self) -> Result<Box<dyn Stream<Item = Vec<Message>>>, Error> {
-        unimplemented!();
+    async fn listen(&self) -> Result<Box<dyn Stream<Item = Result<Vec<Message>, Error>>>, Error> {
+        let session = self.get_session()?;
+        let settings = &self.settings;
+        let client = Client::https(settings.homeserver.clone(), Some(session.clone()));
+
+        let room_id = self.alias2id(settings.room_alias.clone()).await?;
+
+        let stream = client
+            .sync(None, None, SetPresence::Online, None)
+            .err_into::<Error>()
+            .map_ok(|resp: r0::sync::sync_events::Response| {
+                let rooms = resp.rooms.join.clone();
+
+                for (room, data) in rooms.iter() {
+                    debug!("Syncing room {}", room);
+                }
+
+                Vec::<Message>::new()
+            });
+
+        return Ok(Box::new(stream));
     }
 }
 

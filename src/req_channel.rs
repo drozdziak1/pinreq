@@ -10,7 +10,7 @@ pub trait ReqChannel {
     /// Send a pinreq `Message` to this channel
     async fn send_msg(&self, msg: &Message) -> Result<(), Error>;
     ///// Receive a stream of parsed pinreq messages for processing
-    fn listen(&self) -> Result<Box<dyn Stream<Item = Vec<Message>>>, Error>;
+    async fn listen(&self) -> Result<Box<dyn Stream<Item = Result<Vec<Message>, Error>>>, Error>;
 }
 
 /// A trait for settings -> channel conversion
