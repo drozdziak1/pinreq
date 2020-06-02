@@ -14,22 +14,28 @@ mod req_channel;
 mod utils;
 
 use clap::{App, Arg, ArgMatches, SubCommand, Values};
+use dialoguer::{Input, Password, Select};
 use failure::Error;
 use futures::{Stream, StreamExt};
 use gpgme::{Context, Protocol};
 use log::LevelFilter;
+use ruma_client::identifiers::RoomAliasId;
+use url::Url;
 
 use std::{
     collections::HashMap,
+    convert::TryFrom,
     env,
     fs::File,
     io::{self, Write},
 };
 
-use config::Config;
-use matrix::MatrixChannel;
-use message::{Message, MessageKind};
-use req_channel::{ChannelSettings, ReqChannel};
+use crate::{
+    config::Config,
+    matrix::MatrixChannel,
+    message::{Message, MessageKind},
+    req_channel::{ChannelSettings, ReqChannel},
+};
 
 static DEFAULT_PINREQ_MATRIX_ROOM_ALIAS: &'static str = "#ipfs-pinreq:matrix.org";
 
@@ -59,7 +65,7 @@ async fn main() -> Result<(), Error> {
             Arg::with_name("CHANNEL_IDS")
                 .help("A comma-separated list of unique channel IDs")
                 .min_values(1)
-                .required_unless("all")
+                .required_unless_one(&["all", "gen-matrix"])
                 .use_delimiter(true),
         )
         .arg(
@@ -84,8 +90,117 @@ async fn main() -> Result<(), Error> {
             SubCommand::with_name("listen")
                 .about("Listen for pin requests and other events on a pinreq channel"),
         )
+        .subcommand(SubCommand::with_name("gen-matrix").about("Generate a Matrix channel config"))
         .get_matches();
 
+    match matches.subcommand() {
+        ("listen", Some(matches)) => {
+            let (channel_names, cfg_map) = load_config_map(matches)?;
+            handle_listen(matches, &cfg_map, channel_names.as_slice()).await?;
+        }
+        ("request", Some(matches)) => {
+            let (channel_names, cfg_map) = load_config_map(matches)?;
+            handle_request(matches, &cfg_map, channel_names.as_slice()).await?;
+        }
+        ("gen-matrix", Some(matches)) => {
+            handle_gen_matrix().await?;
+        }
+        _other => unreachable!(),
+    }
+
+    Ok(())
+}
+
+async fn handle_listen(
+    matches: &ArgMatches<'_>,
+    cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
+    channels: &[String],
+) -> Result<(), Error> {
+    for ch_name in channels {
+        let mut channel = cfg_map
+            .get(ch_name)
+            .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
+            .to_channel()?;
+
+        let fut: Box<_> = channel.as_ref().listen().await?;
+    }
+    Ok(())
+}
+
+async fn handle_request(
+    matches: &ArgMatches<'_>,
+    cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
+    channels: &[String],
+) -> Result<(), Error> {
+    let ipfs_hash = matches
+        .value_of("IPFS_HASH")
+        .ok_or(format_err!("INTERNAL: expected IPFS_HASH to be specified"))?;
+
+    info!("Pinning {}", ipfs_hash);
+
+    for ch_name in channels {
+        let channel = cfg_map
+            .get(ch_name)
+            .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
+            .to_channel()?;
+
+        let mut ctx = Context::from_protocol(Protocol::OpenPgp)?;
+        let msg = Message::from_kind(MessageKind::Pin(ipfs_hash.to_owned()), &mut ctx)?;
+
+        debug!("[{}] sending msg: {:#?}", ch_name, msg);
+
+        channel.as_ref().send_msg(&msg).await?;
+    }
+    Ok(())
+}
+
+async fn handle_gen_matrix() -> Result<(), Error> {
+    let name = Input::<String>::new()
+        .with_prompt("Human-readable channel name")
+        .interact()?;
+
+    let homeserver = Input::<Url>::new()
+        .with_prompt("Homeserver URL")
+        .default(Url::parse("https://matrix.org")?)
+        .interact()?;
+
+    let room_alias_string = Input::<String>::new()
+        .with_prompt("Room alias")
+        .default("#ipfs-pinreq:matrix.org".parse()?)
+        .interact()?;
+
+    let room_alias: RoomAliasId = RoomAliasId::try_from(room_alias_string)?;
+
+    let username = Input::<String>::new().with_prompt("Username").interact()?;
+
+    let choice = Select::new()
+        .with_prompt("Authentication")
+        .item("Password (Log in")
+        .item("Token (Use existing session)")
+        .interact()?;
+
+    let session = match choice {
+        0 => {
+            // Ask for password
+            let pass: String = Password::new().with_prompt("Password").interact()?;
+	    let client = Client::https(homeserver, None);
+	    client.log_in(username, pass, None, None).await?
+        }
+        1 => {
+            // Use session token
+            let token: String = Input::<String>::new().with_prompt("Token").interact()?;
+	    serde_json::from_str(
+        }
+        _ => unreachable!(),
+    };
+
+    Ok(())
+}
+
+/// Returns (selected channels, available channels hashmap)
+fn load_config_map(
+    matches: &ArgMatches<'_>,
+) -> Result<(Vec<String>, HashMap<String, Box<impl ChannelSettings>>), Error> {
     let cfg = Config::from_file(
         matches
             .value_of("CONFIG_FILE")
@@ -104,69 +219,15 @@ async fn main() -> Result<(), Error> {
         chans
             .map(|c| {
                 if cfg_map.contains_key(c) {
-                    Ok(c)
+                    Ok(c.to_owned())
                 } else {
                     Err(format_err!("Channel {} not found", c))
                 }
             })
             .collect::<Result<Vec<_>, Error>>()?
     } else {
-        cfg_map.keys().map(|s| s.as_str()).collect()
+        cfg_map.keys().cloned().collect()
     };
 
-    match matches.subcommand() {
-        ("listen", Some(matches)) => {
-            handle_listen(matches, &cfg_map, channel_names.as_slice()).await?;
-        }
-        ("request", Some(matches)) => {
-            handle_request(matches, &cfg_map, channel_names.as_slice()).await?;
-        }
-        _other => unreachable!(),
-    }
-
-    Ok(())
-}
-
-async fn handle_listen(
-    matches: &ArgMatches<'_>,
-    cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
-    channels: &[&str],
-) -> Result<(), Error> {
-    for ch_name in channels {
-        let mut channel = cfg_map
-            .get(ch_name.to_owned())
-            .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
-            .to_channel()?;
-
-        let fut: Box<_> = channel.as_ref().listen().await?;
-
-    }
-    Ok(())
-}
-
-async fn handle_request(
-    matches: &ArgMatches<'_>,
-    cfg_map: &HashMap<String, Box<impl ChannelSettings>>,
-    channels: &[&str],
-) -> Result<(), Error> {
-    let ipfs_hash = matches
-        .value_of("IPFS_HASH")
-        .ok_or(format_err!("INTERNAL: expected IPFS_HASH to be specified"))?;
-
-    info!("Pinning {}", ipfs_hash);
-
-    for ch_name in channels {
-        let channel = cfg_map
-            .get(ch_name.to_owned())
-            .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
-            .to_channel()?;
-
-        let mut ctx = Context::from_protocol(Protocol::OpenPgp)?;
-        let msg = Message::from_kind(MessageKind::Pin(ipfs_hash.to_owned()), &mut ctx)?;
-
-        debug!("[{}] sending msg: {:#?}", ch_name, msg);
-
-        channel.as_ref().send_msg(&msg).await?;
-    }
-    Ok(())
+    return Ok((channel_names, cfg_map));
 }

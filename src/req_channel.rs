@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use failure::Error;
-use futures::{stream::Stream, future::Future};
+use futures::{future::Future, stream::Stream};
 
 use crate::message::Message;
 

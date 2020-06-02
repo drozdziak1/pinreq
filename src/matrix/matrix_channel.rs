@@ -154,7 +154,9 @@ impl ReqChannel for MatrixChannel {
 
                 Vec::<Message>::new()
             })
-            .for_each(|resp| async move {debug!("{:?}", resp);});
+            .for_each(|resp| async move {
+                debug!("{:?}", resp);
+            });
 
         return Ok(Box::new(stream_fut));
     }

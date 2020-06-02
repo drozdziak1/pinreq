@@ -29,10 +29,8 @@ impl Config {
                     matrix_ch.name
                 );
             }
-
             ret.insert(matrix_ch.name.clone(), Box::new(matrix_ch));
         }
-
         Ok(ret)
     }
 }
