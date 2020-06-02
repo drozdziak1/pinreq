@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use failure::Error;
-use futures::stream::Stream;
+use futures::{stream::Stream, future::Future};
 
 use crate::message::Message;
 
@@ -9,8 +9,9 @@ use crate::message::Message;
 pub trait ReqChannel {
     /// Send a pinreq `Message` to this channel
     async fn send_msg(&self, msg: &Message) -> Result<(), Error>;
-    ///// Receive a stream of parsed pinreq messages for processing
-    async fn listen(&self) -> Result<Box<dyn Stream<Item = Result<Vec<Message>, Error>>>, Error>;
+    /// Receive a stream of parsed pinreq messages for processing
+    // async fn listen(&self) -> Result<Box<dyn Stream<Item = Result<Vec<Message>, Error>>>, Error>;
+    async fn listen(&self) -> Result<Box<dyn Future<Output = ()>>, Error>;
 }
 
 /// A trait for settings -> channel conversion

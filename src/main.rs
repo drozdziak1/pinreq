@@ -138,12 +138,8 @@ async fn handle_listen(
             .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
             .to_channel()?;
 
-        channel
-            .as_ref()
-            .listen()
-            .await?
-            .collect::<Vec<_>>()
-            .await?;
+        let fut: Box<_> = channel.as_ref().listen().await?;
+
     }
     Ok(())
 }

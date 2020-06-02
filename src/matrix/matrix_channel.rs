@@ -135,14 +135,14 @@ impl ReqChannel for MatrixChannel {
         Ok(())
     }
 
-    async fn listen(&self) -> Result<Box<dyn Stream<Item = Result<Vec<Message>, Error>>>, Error> {
+    async fn listen(&self) -> Result<Box<dyn Future<Output = ()>>, Error> {
         let session = self.get_session()?;
         let settings = &self.settings;
         let client = Client::https(settings.homeserver.clone(), Some(session.clone()));
 
         let room_id = self.alias2id(settings.room_alias.clone()).await?;
 
-        let stream = client
+        let stream_fut = client
             .sync(None, None, SetPresence::Online, None)
             .err_into::<Error>()
             .map_ok(|resp: r0::sync::sync_events::Response| {
@@ -153,14 +153,15 @@ impl ReqChannel for MatrixChannel {
                 }
 
                 Vec::<Message>::new()
-            });
+            })
+            .for_each(|resp| async move {debug!("{:?}", resp);});
 
-        return Ok(Box::new(stream));
+        return Ok(Box::new(stream_fut));
     }
 }
 
 impl ChannelSettings for MatrixChannelSettings {
-    fn to_channel(&self) -> Result<Box<ReqChannel>, Error> {
+    fn to_channel(&self) -> Result<Box<dyn ReqChannel>, Error> {
         Ok(Box::new(MatrixChannel {
             settings: self.clone(),
         }))
