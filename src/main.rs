@@ -19,7 +19,7 @@ use failure::Error;
 use futures::{Stream, StreamExt};
 use gpgme::{Context, Protocol};
 use log::LevelFilter;
-use ruma_client::identifiers::RoomAliasId;
+use ruma_client::{identifiers::RoomAliasId, Client};
 use url::Url;
 
 use std::{
@@ -164,35 +164,23 @@ async fn handle_gen_matrix() -> Result<(), Error> {
         .default(Url::parse("https://matrix.org")?)
         .interact()?;
 
-    let room_alias_string = Input::<String>::new()
-        .with_prompt("Room alias")
-        .default("#ipfs-pinreq:matrix.org".parse()?)
-        .interact()?;
-
-    let room_alias: RoomAliasId = RoomAliasId::try_from(room_alias_string)?;
+    let room_alias: RoomAliasId = RoomAliasId::try_from(
+        Input::<String>::new()
+            .with_prompt("Room alias")
+            .default("#ipfs-pinreq:matrix.org".parse()?)
+            .interact()?,
+    )?;
 
     let username = Input::<String>::new().with_prompt("Username").interact()?;
 
-    let choice = Select::new()
-        .with_prompt("Authentication")
-        .item("Password (Log in")
-        .item("Token (Use existing session)")
-        .interact()?;
+    let mut channel = MatrixChannel::new(&name, homeserver, room_alias)?;
 
-    let session = match choice {
-        0 => {
-            // Ask for password
-            let pass: String = Password::new().with_prompt("Password").interact()?;
-	    let client = Client::https(homeserver, None);
-	    client.log_in(username, pass, None, None).await?
-        }
-        1 => {
-            // Use session token
-            let token: String = Input::<String>::new().with_prompt("Token").interact()?;
-	    serde_json::from_str(
-        }
-        _ => unreachable!(),
-    };
+    {
+        let pass = Password::new().with_prompt("Password").interact()?;
+        channel.log_in(&username, pass).await?;
+    }
+
+    info!("Created room:\n{}", toml::to_string(&channel.settings)?);
 
     Ok(())
 }
