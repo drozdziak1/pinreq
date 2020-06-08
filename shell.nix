@@ -8,6 +8,7 @@ pkgs.mkShell {
     autoconf
     automake
     file
+    gdb
     gettext
     gpgme
     libgpgerror

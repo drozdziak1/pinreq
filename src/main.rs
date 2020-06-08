@@ -49,7 +49,7 @@ async fn main() -> Result<(), Error> {
             .init(),
     }
 
-    let matches = App::new("pinreq")
+    let main_matches = App::new("pinreq")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Stan Drozd <drozdziak1@gmail.com>")
         .about("The IPFS authenticated pin request system")
@@ -93,13 +93,13 @@ async fn main() -> Result<(), Error> {
         .subcommand(SubCommand::with_name("gen-matrix").about("Generate a Matrix channel config"))
         .get_matches();
 
-    match matches.subcommand() {
+    match main_matches.subcommand() {
         ("listen", Some(matches)) => {
-            let (channel_names, cfg_map) = load_config_map(matches)?;
+            let (channel_names, cfg_map) = load_config_map(&main_matches)?;
             handle_listen(matches, &cfg_map, channel_names.as_slice()).await?;
         }
         ("request", Some(matches)) => {
-            let (channel_names, cfg_map) = load_config_map(matches)?;
+            let (channel_names, cfg_map) = load_config_map(&main_matches)?;
             handle_request(matches, &cfg_map, channel_names.as_slice()).await?;
         }
         ("gen-matrix", Some(matches)) => {
@@ -122,7 +122,7 @@ async fn handle_listen(
             .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
             .to_channel()?;
 
-        let fut: Box<_> = channel.as_ref().listen().await?;
+        channel.as_ref().listen().await?;
     }
     Ok(())
 }
@@ -180,7 +180,11 @@ async fn handle_gen_matrix() -> Result<(), Error> {
         channel.log_in(&username, pass).await?;
     }
 
-    info!("Created room:\n{}", toml::to_string(&channel.settings)?);
+    let cfg = Config {
+        matrix: vec![channel.settings],
+    };
+
+    info!("Created room:\n{}", toml::to_string(&cfg)?);
 
     Ok(())
 }

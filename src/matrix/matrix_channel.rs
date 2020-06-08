@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use failure::Error;
 use futures::{
     future::{self, Future},
@@ -7,7 +7,11 @@ use futures::{
 };
 use hyper::client::HttpConnector;
 use ruma_client::{
-    api::r0::{self, sync::sync_events::SetPresence},
+    api::r0::{
+        self,
+        filter::{FilterDefinition, RoomEventFilter, RoomFilter},
+        sync::sync_events::{Filter as SyncFilter, SetPresence},
+    },
     events::{
         room::message::{MessageEventContent, TextMessageEventContent},
         EventType,
@@ -135,21 +139,33 @@ impl ReqChannel for MatrixChannel {
         Ok(())
     }
 
-    async fn listen(&self) -> Result<Box<dyn Future<Output = ()>>, Error> {
+    async fn listen(&self) -> Result<(), Error> {
         let session = self.get_session()?;
         let settings = &self.settings;
         let client = Client::https(settings.homeserver.clone(), Some(session.clone()));
 
         let room_id = self.alias2id(settings.room_alias.clone()).await?;
 
+        let filter = SyncFilter::FilterDefinition(FilterDefinition {
+            room: Some(RoomFilter {
+                timeline: Some(RoomEventFilter {
+                    types: Some(vec!["m.room.message".to_owned()]),
+                    ..Default::default()
+                }),
+                rooms: Some(vec![room_id]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
         let stream_fut = client
-            .sync(None, None, SetPresence::Online, None)
+            .sync(Some(filter), None, SetPresence::Online, None)
             .err_into::<Error>()
             .map_ok(|resp: r0::sync::sync_events::Response| {
                 let rooms = resp.rooms.join.clone();
 
                 for (room, data) in rooms.iter() {
-                    debug!("Syncing room {}", room);
+                    debug!("Sync: {} data:\n{:#?}", room, data.timeline.events);
                 }
 
                 Vec::<Message>::new()
@@ -158,7 +174,8 @@ impl ReqChannel for MatrixChannel {
                 debug!("{:?}", resp);
             });
 
-        return Ok(Box::new(stream_fut));
+        stream_fut.await;
+        return Ok(());
     }
 }
 
