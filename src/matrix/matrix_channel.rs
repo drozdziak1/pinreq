@@ -13,7 +13,8 @@ use ruma_client::{
         sync::sync_events::{Filter as SyncFilter, SetPresence},
     },
     events::{
-        room::message::{MessageEventContent, TextMessageEventContent},
+        collections::all::RoomEvent,
+        room::message::{MessageEvent, MessageEventContent, TextMessageEventContent},
         EventType,
     },
     identifiers::{RoomAliasId, RoomId},
@@ -125,12 +126,9 @@ impl ReqChannel for MatrixChannel {
                 event_type: EventType::RoomMessage,
                 // Matrix's measure for request idempotency; must be unique
                 txn_id: format!("{:?}:{}", msg.kind, Utc::now().to_rfc3339()),
-                data: to_raw_json_value(&MessageEventContent::Text(TextMessageEventContent {
-                    body: serde_json::to_string(msg)?,
-                    format: None,
-                    formatted_body: None,
-                    relates_to: None,
-                }))?,
+                data: to_raw_json_value(&MessageEventContent::Text(
+                    TextMessageEventContent::new_plain(serde_json::to_string(msg)?),
+                ))?,
             })
             .await?;
 
@@ -164,11 +162,27 @@ impl ReqChannel for MatrixChannel {
             .map_ok(|resp: r0::sync::sync_events::Response| {
                 let rooms = resp.rooms.join.clone();
 
+                let mut msgs = Vec::<Message>::new();
                 for (room, data) in rooms.iter() {
-                    debug!("Sync: {} data:\n{:#?}", room, data.timeline.events);
+                    debug!("Parsing {} data:", room);
+                    for event in data.timeline.events.clone() {
+                        match event.deserialize()? {
+                            RoomEvent::RoomMessage(MessageEvent {
+                                content: MessageEventContent::Text(txt),
+                                ..
+                            }) => {
+				debug!("Text message:\n{}", txt.body);
+				let msg: Message = serde_json::from_str(&txt.body)?;
+
+				info!("Received message {:?}", msg.kind);
+				msgs.push(msg);
+			    }
+                            _ => {}
+                        }
+                    }
                 }
 
-                Vec::<Message>::new()
+                Ok::<_, Error>(msgs)
             })
             .for_each(|resp| async move {
                 debug!("{:?}", resp);
