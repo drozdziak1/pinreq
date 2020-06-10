@@ -16,7 +16,7 @@ mod utils;
 use clap::{App, Arg, ArgMatches, SubCommand, Values};
 use dialoguer::{Input, Password, Select};
 use failure::Error;
-use futures::{Stream, StreamExt};
+use futures::prelude::*;
 use gpgme::{Context, Protocol};
 use log::LevelFilter;
 use ruma_client::{identifiers::RoomAliasId, Client};
@@ -122,7 +122,16 @@ async fn handle_listen(
             .ok_or(format_err!("INTERNAL: Channel {} not found", ch_name))?
             .to_channel()?;
 
-        channel.as_ref().listen().await?;
+        // Process messages from channel
+        channel
+            .as_ref()
+            .listen()
+            .await?
+            .try_for_each(|msgs| async move {
+                info!("{}: Got {} new messages", ch_name, msgs.len());
+                Ok(())
+            })
+            .await?;
     }
     Ok(())
 }

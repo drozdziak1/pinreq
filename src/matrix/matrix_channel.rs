@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use failure::Error;
 use futures::{
-    future::{self, Future},
-    stream::{self, Stream, StreamExt, TryStream, TryStreamExt},
+    stream::{TryStream, TryStreamExt},
+    Stream,
 };
 use hyper::client::HttpConnector;
 use ruma_client::{
@@ -26,7 +26,7 @@ use url::Url;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     convert::TryFrom,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, pin::Pin,
 };
 
 use crate::{
@@ -137,7 +137,7 @@ impl ReqChannel for MatrixChannel {
         Ok(())
     }
 
-    async fn listen(&self) -> Result<(), Error> {
+    async fn listen(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Vec<Message>, Error>>>>, Error> {
         let session = self.get_session()?;
         let settings = &self.settings;
         let client = Client::https(settings.homeserver.clone(), Some(session.clone()));
@@ -156,10 +156,10 @@ impl ReqChannel for MatrixChannel {
             ..Default::default()
         });
 
-        let stream_fut = client
+        let stream = client
             .sync(Some(filter), None, SetPresence::Online, None)
             .err_into::<Error>()
-            .map_ok(|resp: r0::sync::sync_events::Response| {
+            .and_then(|resp: r0::sync::sync_events::Response| async move {
                 let rooms = resp.rooms.join.clone();
 
                 let mut msgs = Vec::<Message>::new();
@@ -171,25 +171,21 @@ impl ReqChannel for MatrixChannel {
                                 content: MessageEventContent::Text(txt),
                                 ..
                             }) => {
-				debug!("Text message:\n{}", txt.body);
-				let msg: Message = serde_json::from_str(&txt.body)?;
+                                debug!("Text message:\n{}", txt.body);
+                                let msg: Message = serde_json::from_str(&txt.body)?;
 
-				info!("Received message {:?}", msg.kind);
-				msgs.push(msg);
-			    }
+                                info!("Received message {:?}", msg.kind);
+                                msgs.push(msg);
+                            }
                             _ => {}
                         }
                     }
                 }
 
                 Ok::<_, Error>(msgs)
-            })
-            .for_each(|resp| async move {
-                debug!("{:?}", resp);
             });
 
-        stream_fut.await;
-        return Ok(());
+        return Ok(Box::pin(stream));
     }
 }
 
