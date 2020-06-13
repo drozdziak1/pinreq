@@ -180,9 +180,14 @@ async fn handle_gen_matrix() -> Result<(), Error> {
             .interact()?,
     )?;
 
+    let initial_backlog: u32 = Input::<u32>::new()
+        .with_prompt("Initial backlog size")
+        .default(100)
+        .interact()?;
+
     let username = Input::<String>::new().with_prompt("Username").interact()?;
 
-    let mut channel = MatrixChannel::new(&name, homeserver, room_alias)?;
+    let mut channel = MatrixChannel::new(&name, homeserver, room_alias, initial_backlog)?;
 
     {
         let pass = Password::new().with_prompt("Password").interact()?;

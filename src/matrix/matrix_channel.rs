@@ -26,7 +26,8 @@ use url::Url;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     convert::TryFrom,
-    sync::{Arc, Mutex}, pin::Pin,
+    pin::Pin,
+    sync::{Arc, Mutex},
 };
 
 use crate::{
@@ -44,26 +45,32 @@ pub struct MatrixChannel {
 pub struct MatrixChannelSettings {
     /// Human-readable name of this Matrix channel
     pub name: String,
+    /// Matrix homeserver URL
     pub homeserver: Url,
+    /// Human-readable Matrix room name
     pub room_alias: RoomAliasId,
+    /// How many initial messages to pull from the room on listen()
+    pub initial_backlog: u32,
+    /// Matrix login session information
     pub session: Option<Session>,
 }
 
 impl MatrixChannel {
-    pub fn new(name: &str, homeserver: Url, room_alias: RoomAliasId) -> Result<Self, Error> {
+    pub fn new(name: &str, homeserver: Url, room_alias: RoomAliasId, initial_backlog: u32) -> Result<Self, Error> {
         Ok(Self {
             settings: MatrixChannelSettings {
                 name: name.to_owned(),
                 homeserver,
                 room_alias: RoomAliasId::try_from(room_alias)?,
                 session: None,
+		initial_backlog,
             },
         })
     }
 
     /// Attempts to log onto `self.homeserver`. The `password` requires ownership for extra
     /// confidence that the password is dropped after use. (or cloned intentionally if need be)
-    /// fills `self.session` on success. If `self.session` is `Some` a new session overwrites the
+    /// Fills `self.session` on success. If `self.session` is `Some` a new session overwrites the
     /// present one.
     pub async fn log_in(&mut self, username: &str, password: String) -> Result<(), Error> {
         let client = Client::https(self.settings.homeserver.clone(), None);
@@ -137,7 +144,9 @@ impl ReqChannel for MatrixChannel {
         Ok(())
     }
 
-    async fn listen(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Vec<Message>, Error>>>>, Error> {
+    async fn listen(
+        &self,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<Vec<Message>, Error>>>>, Error> {
         let session = self.get_session()?;
         let settings = &self.settings;
         let client = Client::https(settings.homeserver.clone(), Some(session.clone()));
@@ -148,6 +157,7 @@ impl ReqChannel for MatrixChannel {
             room: Some(RoomFilter {
                 timeline: Some(RoomEventFilter {
                     types: Some(vec!["m.room.message".to_owned()]),
+		    limit: Some(self.settings.initial_backlog.clone().into()),
                     ..Default::default()
                 }),
                 rooms: Some(vec![room_id]),
@@ -172,10 +182,15 @@ impl ReqChannel for MatrixChannel {
                                 ..
                             }) => {
                                 debug!("Text message:\n{}", txt.body);
-                                let msg: Message = serde_json::from_str(&txt.body)?;
-
-                                info!("Received message {:?}", msg.kind);
-                                msgs.push(msg);
+                                match serde_json::from_str::<Message>(&txt.body) {
+                                    Ok(msg) => {
+                                        info!("Received message {:?}", msg.kind);
+                                        msgs.push(msg);
+                                    }
+                                    Err(e) => {
+                                        debug!("Parsing failed, skipping: {}", e);
+                                    }
+                                }
                             }
                             _ => {}
                         }
