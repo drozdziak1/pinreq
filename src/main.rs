@@ -176,18 +176,18 @@ async fn handle_gen_matrix() -> Result<(), Error> {
     let room_alias: RoomAliasId = RoomAliasId::try_from(
         Input::<String>::new()
             .with_prompt("Room alias")
-            .default("#ipfs-pinreq:matrix.org".parse()?)
+            .default(DEFAULT_PINREQ_MATRIX_ROOM_ALIAS.parse()?)
             .interact()?,
     )?;
 
-    let initial_backlog: u32 = Input::<u32>::new()
+    let initial_backlog_size: u32 = Input::<u32>::new()
         .with_prompt("Initial backlog size")
         .default(100)
         .interact()?;
 
     let username = Input::<String>::new().with_prompt("Username").interact()?;
 
-    let mut channel = MatrixChannel::new(&name, homeserver, room_alias, initial_backlog)?;
+    let mut channel = MatrixChannel::new(&name, homeserver, room_alias, initial_backlog_size)?;
 
     {
         let pass = Password::new().with_prompt("Password").interact()?;

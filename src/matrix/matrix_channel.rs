@@ -50,20 +50,20 @@ pub struct MatrixChannelSettings {
     /// Human-readable Matrix room name
     pub room_alias: RoomAliasId,
     /// How many initial messages to pull from the room on listen()
-    pub initial_backlog: u32,
+    pub initial_backlog_size: u32,
     /// Matrix login session information
     pub session: Option<Session>,
 }
 
 impl MatrixChannel {
-    pub fn new(name: &str, homeserver: Url, room_alias: RoomAliasId, initial_backlog: u32) -> Result<Self, Error> {
+    pub fn new(name: &str, homeserver: Url, room_alias: RoomAliasId, initial_backlog_size: u32) -> Result<Self, Error> {
         Ok(Self {
             settings: MatrixChannelSettings {
                 name: name.to_owned(),
                 homeserver,
                 room_alias: RoomAliasId::try_from(room_alias)?,
                 session: None,
-		initial_backlog,
+		initial_backlog_size: initial_backlog_size,
             },
         })
     }
@@ -157,7 +157,7 @@ impl ReqChannel for MatrixChannel {
             room: Some(RoomFilter {
                 timeline: Some(RoomEventFilter {
                     types: Some(vec!["m.room.message".to_owned()]),
-		    limit: Some(self.settings.initial_backlog.clone().into()),
+		    limit: Some(self.settings.initial_backlog_size.clone().into()),
                     ..Default::default()
                 }),
                 rooms: Some(vec![room_id]),
