@@ -18,6 +18,7 @@ use dialoguer::{Input, Password, Select};
 use failure::Error;
 use futures::prelude::*;
 use gpgme::{Context, Protocol};
+use ipfs_api::IpfsClient;
 use log::LevelFilter;
 use ruma_client::{identifiers::RoomAliasId, Client};
 use url::Url;
@@ -102,7 +103,7 @@ async fn main() -> Result<(), Error> {
             let (channel_names, cfg_map) = load_config_map(&main_matches)?;
             handle_request(matches, &cfg_map, channel_names.as_slice()).await?;
         }
-        ("gen-matrix", Some(matches)) => {
+        ("gen-matrix", Some(_)) => {
             handle_gen_matrix().await?;
         }
         _other => unreachable!(),
@@ -128,7 +129,14 @@ async fn handle_listen(
             .listen()
             .await?
             .try_for_each(|msgs| async move {
-                info!("{}: Got {} new messages", ch_name, msgs.len());
+                let client = IpfsClient::default();
+                debug!("{}: Got {} new messages", ch_name, msgs.len());
+                for msg in msgs {
+                    if let MessageKind::Pin(hash) = msg.kind {
+                        info!("Pinning hash {}", hash);
+                        client.pin_add(&hash, true).await?;
+                    };
+                }
                 Ok(())
             })
             .await?;
